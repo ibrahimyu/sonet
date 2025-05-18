@@ -62,7 +62,7 @@
 ## 🚀 Quick Start
 
 ```bash
-git clone https://github.com/yourname/sonet
+git clone https://github.com/ibrahimyu/sonet
 cd sonet
 cp .env.example .env
 # Edit .env file to configure your database
