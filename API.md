@@ -24,13 +24,30 @@ Request Body:
 ```json
 {
   "content": "Hello world!",
-  "image_url": "https://example.com/image.jpg",  // Optional
   "city": "New York",                           // Optional - City name
   "latitude": 40.7128,                          // Optional - Geographic coordinate
   "longitude": -74.0060,                        // Optional - Geographic coordinate
   "metadata": {                                  // Optional
     "tags": ["hello", "world"]
-  }
+  },
+  "attachments": [                              // Optional - Multiple attachments
+    {
+      "url": "https://example.com/image.jpg",
+      "type": "image"
+    },
+    {
+      "url": "https://example.com/video.mp4",
+      "type": "video"
+    },
+    {
+      "url": "https://example.com/file.pdf",
+      "type": "file"
+    },
+    {
+      "url": "post-123",                        // ID of another post
+      "type": "post"
+    }
+  ]
 }
 ```
 
@@ -78,13 +95,22 @@ Request Body:
 ```json
 {
   "content": "Updated content",
-  "image_url": "https://example.com/new-image.jpg",
   "city": "Updated City",
   "latitude": 34.0522,
   "longitude": -118.2437,
   "metadata": {
     "tags": ["updated", "content"]
-  }
+  },
+  "attachments": [                              // Optional - Replaces existing attachments
+    {
+      "url": "https://example.com/new-image.jpg",
+      "type": "image"
+    },
+    {
+      "url": "https://example.com/new-video.mp4",
+      "type": "video"
+    }
+  ]
 }
 ```
 
@@ -134,8 +160,13 @@ Request Body:
 {
   "post_id": "post-123",
   "content": "Great post!",
-  "parent_id": "comment-456",  // Optional (for replies)
-  "metadata": {}               // Optional
+  "parent_id": "comment-456",        // Optional (for replies)
+  "metadata": {},                    // Optional
+  "has_attachment": true,            // Optional - Set true if attaching media
+  "attachment": {                    // Required if has_attachment is true
+    "url": "https://example.com/image.jpg",
+    "type": "image"                  // Possible types: "image", "video", "file", "post"
+  }
 }
 ```
 
@@ -165,7 +196,12 @@ Request Body:
 ```json
 {
   "content": "Updated comment",
-  "metadata": {}  // Optional
+  "metadata": {},                   // Optional
+  "has_attachment": true,           // Optional - Set false to remove existing attachment
+  "attachment": {                   // Required if has_attachment is true
+    "url": "https://example.com/updated-image.jpg",
+    "type": "image"                 // Possible types: "image", "video", "file", "post"
+  }
 }
 ```
 

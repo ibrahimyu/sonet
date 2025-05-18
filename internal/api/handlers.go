@@ -143,6 +143,15 @@ func healthCheck(db adapters.DatabaseAdapter) fiber.Handler {
 	}
 }
 
+// PostWithAttachments is a struct for handling post creation/update with attachments
+type PostWithAttachments struct {
+	models.Post
+	AttachmentsData []struct {
+		URL  string                `json:"url"`
+		Type models.AttachmentType `json:"type"`
+	} `json:"attachments"`
+}
+
 // Post handlers
 func createPost(db adapters.DatabaseAdapter) fiber.Handler {
 	return func(c *fiber.Ctx) error {
@@ -151,11 +160,12 @@ func createPost(db adapters.DatabaseAdapter) fiber.Handler {
 			return fiber.ErrUnauthorized
 		}
 
-		post := new(models.Post)
-		if err := c.BodyParser(post); err != nil {
+		postInput := new(PostWithAttachments)
+		if err := c.BodyParser(postInput); err != nil {
 			return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
 		}
 
+		post := &postInput.Post
 		post.UserID = userID
 
 		// Validate location fields if provided
@@ -170,6 +180,27 @@ func createPost(db adapters.DatabaseAdapter) fiber.Handler {
 
 		if err := db.CreatePost(post); err != nil {
 			return err
+		}
+
+		// Create attachments if any
+		for _, attachmentData := range postInput.AttachmentsData {
+			postID := post.ID
+			attachment := &models.Attachment{
+				URL:      attachmentData.URL,
+				Type:     attachmentData.Type,
+				PostID:   &postID,
+				Metadata: models.JSON{},
+			}
+
+			// Validate attachment
+			if err := attachment.Validate(); err != nil {
+				return fiber.NewError(fiber.StatusBadRequest, err.Error())
+			}
+
+			if err := db.CreateAttachment(attachment); err != nil {
+				return err
+			}
+			post.Attachments = append(post.Attachments, *attachment)
 		}
 
 		hooks.TriggerPostCreated(userID, post)
@@ -238,13 +269,14 @@ func updatePost(db adapters.DatabaseAdapter) fiber.Handler {
 			return fiber.ErrForbidden
 		}
 
-		updatedPost := new(models.Post)
-		if err := c.BodyParser(updatedPost); err != nil {
+		postInput := new(PostWithAttachments)
+		if err := c.BodyParser(postInput); err != nil {
 			return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
 		}
 
+		updatedPost := &postInput.Post
+
 		post.Content = updatedPost.Content
-		post.ImageURL = updatedPost.ImageURL
 		post.Metadata = updatedPost.Metadata
 
 		// Update location fields
@@ -264,6 +296,38 @@ func updatePost(db adapters.DatabaseAdapter) fiber.Handler {
 
 		if err := db.UpdatePost(post); err != nil {
 			return err
+		}
+
+		// If new attachments are provided, replace existing ones
+		if len(postInput.AttachmentsData) > 0 {
+			// Delete existing attachments
+			for _, attachment := range post.Attachments {
+				if err := db.DeleteAttachment(attachment.ID); err != nil {
+					return err
+				}
+			}
+
+			// Add new attachments
+			post.Attachments = nil
+			for _, attachmentData := range postInput.AttachmentsData {
+				postID := post.ID
+				attachment := &models.Attachment{
+					URL:      attachmentData.URL,
+					Type:     attachmentData.Type,
+					PostID:   &postID,
+					Metadata: models.JSON{},
+				}
+
+				// Validate attachment
+				if err := attachment.Validate(); err != nil {
+					return fiber.NewError(fiber.StatusBadRequest, err.Error())
+				}
+
+				if err := db.CreateAttachment(attachment); err != nil {
+					return err
+				}
+				post.Attachments = append(post.Attachments, *attachment)
+			}
 		}
 
 		hooks.TriggerPostUpdated(userID, post)
@@ -301,6 +365,16 @@ func deletePost(db adapters.DatabaseAdapter) fiber.Handler {
 	}
 }
 
+// CommentWithAttachment is a struct for handling comment creation/update with attachment
+type CommentWithAttachment struct {
+	models.Comment
+	AttachmentData struct {
+		URL  string                `json:"url"`
+		Type models.AttachmentType `json:"type"`
+	} `json:"attachment"`
+	HasAttachment bool `json:"has_attachment"`
+}
+
 // Comment handlers
 func createComment(db adapters.DatabaseAdapter) fiber.Handler {
 	return func(c *fiber.Ctx) error {
@@ -309,10 +383,12 @@ func createComment(db adapters.DatabaseAdapter) fiber.Handler {
 			return fiber.ErrUnauthorized
 		}
 
-		comment := new(models.Comment)
-		if err := c.BodyParser(comment); err != nil {
+		commentInput := new(CommentWithAttachment)
+		if err := c.BodyParser(commentInput); err != nil {
 			return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
 		}
+
+		comment := &commentInput.Comment
 
 		if comment.PostID == "" {
 			return fiber.NewError(fiber.StatusBadRequest, "Post ID is required")
@@ -335,6 +411,27 @@ func createComment(db adapters.DatabaseAdapter) fiber.Handler {
 		comment.UserID = userID
 		if err := db.CreateComment(comment); err != nil {
 			return err
+		}
+
+		// Create attachment if provided
+		if commentInput.HasAttachment {
+			commentID := comment.ID
+			attachment := &models.Attachment{
+				URL:       commentInput.AttachmentData.URL,
+				Type:      commentInput.AttachmentData.Type,
+				CommentID: &commentID,
+				Metadata:  models.JSON{},
+			}
+
+			// Validate attachment
+			if err := attachment.Validate(); err != nil {
+				return fiber.NewError(fiber.StatusBadRequest, err.Error())
+			}
+
+			if err := db.CreateAttachment(attachment); err != nil {
+				return err
+			}
+			comment.Attachment = attachment
 		}
 
 		hooks.TriggerCommentCreated(userID, comment)
@@ -408,16 +505,53 @@ func updateComment(db adapters.DatabaseAdapter) fiber.Handler {
 			return fiber.ErrForbidden
 		}
 
-		updatedComment := new(models.Comment)
-		if err := c.BodyParser(updatedComment); err != nil {
+		commentInput := new(CommentWithAttachment)
+		if err := c.BodyParser(commentInput); err != nil {
 			return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
 		}
+
+		updatedComment := &commentInput.Comment
 
 		comment.Content = updatedComment.Content
 		comment.Metadata = updatedComment.Metadata
 
 		if err := db.UpdateComment(comment); err != nil {
 			return err
+		}
+
+		// Handle attachment update
+		if commentInput.HasAttachment {
+			// Delete existing attachment if any
+			if comment.Attachment != nil {
+				if err := db.DeleteAttachment(comment.Attachment.ID); err != nil {
+					return err
+				}
+			}
+
+			// Add new attachment
+			commentID := comment.ID
+			attachment := &models.Attachment{
+				URL:       commentInput.AttachmentData.URL,
+				Type:      commentInput.AttachmentData.Type,
+				CommentID: &commentID,
+				Metadata:  models.JSON{},
+			}
+
+			// Validate attachment
+			if err := attachment.Validate(); err != nil {
+				return fiber.NewError(fiber.StatusBadRequest, err.Error())
+			}
+
+			if err := db.CreateAttachment(attachment); err != nil {
+				return err
+			}
+			comment.Attachment = attachment
+		} else if comment.Attachment != nil {
+			// Remove attachment if HasAttachment is false but there was an attachment
+			if err := db.DeleteAttachment(comment.Attachment.ID); err != nil {
+				return err
+			}
+			comment.Attachment = nil
 		}
 
 		hooks.TriggerCommentUpdated(userID, comment)

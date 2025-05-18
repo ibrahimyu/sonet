@@ -121,6 +121,29 @@ func (m *MockDatabaseAdapter) FindNearbyPosts(lat, lng float64, radiusKm float64
 	return args.Get(0).([]*models.Post), args.Error(1)
 }
 
+func (m *MockDatabaseAdapter) CreateAttachment(attachment *models.Attachment) error {
+	args := m.Called(attachment)
+	return args.Error(0)
+}
+
+func (m *MockDatabaseAdapter) GetAttachmentsForPost(postID string) ([]*models.Attachment, error) {
+	args := m.Called(postID)
+	return args.Get(0).([]*models.Attachment), args.Error(1)
+}
+
+func (m *MockDatabaseAdapter) GetAttachmentForComment(commentID string) (*models.Attachment, error) {
+	args := m.Called(commentID)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(*models.Attachment), args.Error(1)
+}
+
+func (m *MockDatabaseAdapter) DeleteAttachment(id string) error {
+	args := m.Called(id)
+	return args.Error(0)
+}
+
 // Helper function to create a test app
 func setupTestApp(db *MockDatabaseAdapter) *fiber.App {
 	app := fiber.New(fiber.Config{

@@ -35,6 +35,12 @@ type DatabaseAdapter interface {
 	ListReactions(targetID, targetType string) ([]*models.Reaction, error)
 	DeleteReaction(id string) error
 
+	// Attachments
+	CreateAttachment(attachment *models.Attachment) error
+	GetAttachmentsForPost(postID string) ([]*models.Attachment, error)
+	GetAttachmentForComment(commentID string) (*models.Attachment, error)
+	DeleteAttachment(id string) error
+
 	// Utilities
 	Close() error
 }

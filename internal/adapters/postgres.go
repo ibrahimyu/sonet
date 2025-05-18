@@ -56,7 +56,7 @@ func newPostgresAdapter() (*PostgresAdapter, error) {
 	}
 
 	// Auto migrate the schema
-	if err := db.AutoMigrate(&models.Post{}, &models.Comment{}, &models.Reaction{}); err != nil {
+	if err := db.AutoMigrate(&models.Post{}, &models.Comment{}, &models.Reaction{}, &models.Attachment{}); err != nil {
 		return nil, fmt.Errorf("failed to migrate database schema: %v", err)
 	}
 
@@ -68,17 +68,28 @@ func (a *PostgresAdapter) CreatePost(post *models.Post) error {
 	return a.db.Create(post).Error
 }
 
-// GetPostByID retrieves a post by its ID
+// GetPostByID retrieves a post by its ID with attachments
 func (a *PostgresAdapter) GetPostByID(id string) (*models.Post, error) {
 	var post models.Post
 	err := a.db.First(&post, "id = ?", id).Error
 	if err != nil {
 		return nil, err
 	}
+
+	// Load attachments
+	attachments, err := a.GetAttachmentsForPost(id)
+	if err != nil {
+		return nil, err
+	}
+	post.Attachments = make([]models.Attachment, len(attachments))
+	for i, attachment := range attachments {
+		post.Attachments[i] = *attachment
+	}
+
 	return &post, nil
 }
 
-// ListPosts retrieves posts with pagination
+// ListPosts retrieves posts with pagination and attachments
 func (a *PostgresAdapter) ListPosts(userID string, limit, offset int) ([]*models.Post, error) {
 	var posts []*models.Post
 	query := a.db.Order("created_at DESC").Limit(limit).Offset(offset)
@@ -87,7 +98,23 @@ func (a *PostgresAdapter) ListPosts(userID string, limit, offset int) ([]*models
 	}
 
 	err := query.Find(&posts).Error
-	return posts, err
+	if err != nil {
+		return nil, err
+	}
+
+	// Load attachments for each post
+	for _, post := range posts {
+		attachments, err := a.GetAttachmentsForPost(post.ID)
+		if err != nil {
+			return nil, err
+		}
+		post.Attachments = make([]models.Attachment, len(attachments))
+		for i, attachment := range attachments {
+			post.Attachments[i] = *attachment
+		}
+	}
+
+	return posts, nil
 }
 
 // UpdatePost updates an existing post
@@ -95,7 +122,7 @@ func (a *PostgresAdapter) UpdatePost(post *models.Post) error {
 	return a.db.Save(post).Error
 }
 
-// DeletePost deletes a post and all its comments and reactions
+// DeletePost deletes a post and all its comments, attachments and reactions
 func (a *PostgresAdapter) DeletePost(id string) error {
 	return a.db.Transaction(func(tx *gorm.DB) error {
 		// Delete all reactions to this post
@@ -109,15 +136,25 @@ func (a *PostgresAdapter) DeletePost(id string) error {
 			return err
 		}
 
-		// Delete all reactions to these comments
+		// Delete all reactions and attachments to these comments
 		for _, comment := range comments {
 			if err := tx.Delete(&models.Reaction{}, "target_id = ? AND target_type = ?", comment.ID, "comment").Error; err != nil {
+				return err
+			}
+
+			// Delete comment attachments
+			if err := tx.Delete(&models.Attachment{}, "comment_id = ?", comment.ID).Error; err != nil {
 				return err
 			}
 		}
 
 		// Delete all comments
 		if err := tx.Delete(&models.Comment{}, "post_id = ?", id).Error; err != nil {
+			return err
+		}
+
+		// Delete all attachments for this post
+		if err := tx.Delete(&models.Attachment{}, "post_id = ?", id).Error; err != nil {
 			return err
 		}
 
@@ -131,17 +168,25 @@ func (a *PostgresAdapter) CreateComment(comment *models.Comment) error {
 	return a.db.Create(comment).Error
 }
 
-// GetCommentByID retrieves a comment by its ID
+// GetCommentByID retrieves a comment by its ID with attachment
 func (a *PostgresAdapter) GetCommentByID(id string) (*models.Comment, error) {
 	var comment models.Comment
 	err := a.db.First(&comment, "id = ?", id).Error
 	if err != nil {
 		return nil, err
 	}
+
+	// Load attachment if exists
+	attachment, err := a.GetAttachmentForComment(id)
+	if err == nil {
+		comment.Attachment = attachment
+	}
+	// If error is record not found, that's fine - comment may not have an attachment
+
 	return &comment, nil
 }
 
-// ListComments retrieves comments with pagination
+// ListComments retrieves comments with pagination and attachments
 func (a *PostgresAdapter) ListComments(postID string, limit, offset int) ([]*models.Comment, error) {
 	var comments []*models.Comment
 	err := a.db.Where("post_id = ?", postID).
@@ -149,7 +194,21 @@ func (a *PostgresAdapter) ListComments(postID string, limit, offset int) ([]*mod
 		Limit(limit).
 		Offset(offset).
 		Find(&comments).Error
-	return comments, err
+
+	if err != nil {
+		return nil, err
+	}
+
+	// Load attachment for each comment
+	for _, comment := range comments {
+		attachment, err := a.GetAttachmentForComment(comment.ID)
+		if err == nil {
+			comment.Attachment = attachment
+		}
+		// If error is record not found, that's fine - comment may not have an attachment
+	}
+
+	return comments, nil
 }
 
 // UpdateComment updates an existing comment
@@ -157,11 +216,16 @@ func (a *PostgresAdapter) UpdateComment(comment *models.Comment) error {
 	return a.db.Save(comment).Error
 }
 
-// DeleteComment deletes a comment and all its reactions
+// DeleteComment deletes a comment, its attachment and all its reactions
 func (a *PostgresAdapter) DeleteComment(id string) error {
 	return a.db.Transaction(func(tx *gorm.DB) error {
 		// Delete all reactions to this comment
 		if err := tx.Delete(&models.Reaction{}, "target_id = ? AND target_type = ?", id, "comment").Error; err != nil {
+			return err
+		}
+
+		// Delete attachment if exists
+		if err := tx.Delete(&models.Attachment{}, "comment_id = ?", id).Error; err != nil {
 			return err
 		}
 
@@ -265,4 +329,33 @@ func (a *PostgresAdapter) FindNearbyPosts(lat, lng float64, radiusKm float64, li
 	).Scan(&posts).Error
 
 	return posts, err
+}
+
+// Attachment methods
+
+// CreateAttachment creates a new attachment
+func (a *PostgresAdapter) CreateAttachment(attachment *models.Attachment) error {
+	return a.db.Create(attachment).Error
+}
+
+// GetAttachmentsForPost retrieves all attachments for a post
+func (a *PostgresAdapter) GetAttachmentsForPost(postID string) ([]*models.Attachment, error) {
+	var attachments []*models.Attachment
+	err := a.db.Where("post_id = ?", postID).Find(&attachments).Error
+	return attachments, err
+}
+
+// GetAttachmentForComment retrieves an attachment for a comment
+func (a *PostgresAdapter) GetAttachmentForComment(commentID string) (*models.Attachment, error) {
+	var attachment models.Attachment
+	err := a.db.Where("comment_id = ?", commentID).First(&attachment).Error
+	if err != nil {
+		return nil, err
+	}
+	return &attachment, nil
+}
+
+// DeleteAttachment deletes an attachment
+func (a *PostgresAdapter) DeleteAttachment(id string) error {
+	return a.db.Delete(&models.Attachment{}, "id = ?", id).Error
 }

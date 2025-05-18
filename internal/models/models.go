@@ -9,28 +9,29 @@ import (
 
 // Post represents a user post
 type Post struct {
-	ID        string    `json:"id" gorm:"primaryKey"`
-	UserID    string    `json:"user_id" gorm:"index"`
-	Content   string    `json:"content"`
-	ImageURL  string    `json:"image_url,omitempty"`
-	City      string    `json:"city,omitempty" gorm:"index"`
-	Latitude  float64   `json:"latitude,omitempty" gorm:"index"`
-	Longitude float64   `json:"longitude,omitempty" gorm:"index"`
-	Metadata  JSON      `json:"metadata,omitempty" gorm:"type:jsonb"`
-	CreatedAt time.Time `json:"created_at"`
-	UpdatedAt time.Time `json:"updated_at"`
+	ID          string       `json:"id" gorm:"primaryKey"`
+	UserID      string       `json:"user_id" gorm:"index"`
+	Content     string       `json:"content"`
+	City        string       `json:"city,omitempty" gorm:"index"`
+	Latitude    float64      `json:"latitude,omitempty" gorm:"index"`
+	Longitude   float64      `json:"longitude,omitempty" gorm:"index"`
+	Metadata    JSON         `json:"metadata,omitempty" gorm:"type:jsonb"`
+	Attachments []Attachment `json:"attachments,omitempty" gorm:"-"` // Loaded separately
+	CreatedAt   time.Time    `json:"created_at"`
+	UpdatedAt   time.Time    `json:"updated_at"`
 }
 
 // Comment represents a comment on a post
 type Comment struct {
-	ID        string    `json:"id" gorm:"primaryKey"`
-	PostID    string    `json:"post_id" gorm:"index"`
-	UserID    string    `json:"user_id" gorm:"index"`
-	Content   string    `json:"content"`
-	ParentID  *string   `json:"parent_id,omitempty" gorm:"index"`
-	Metadata  JSON      `json:"metadata,omitempty" gorm:"type:jsonb"`
-	CreatedAt time.Time `json:"created_at"`
-	UpdatedAt time.Time `json:"updated_at"`
+	ID         string      `json:"id" gorm:"primaryKey"`
+	PostID     string      `json:"post_id" gorm:"index"`
+	UserID     string      `json:"user_id" gorm:"index"`
+	Content    string      `json:"content"`
+	ParentID   *string     `json:"parent_id,omitempty" gorm:"index"`
+	Metadata   JSON        `json:"metadata,omitempty" gorm:"type:jsonb"`
+	Attachment *Attachment `json:"attachment,omitempty" gorm:"-"` // Loaded separately
+	CreatedAt  time.Time   `json:"created_at"`
+	UpdatedAt  time.Time   `json:"updated_at"`
 }
 
 // Reaction represents a user reaction to a post or comment

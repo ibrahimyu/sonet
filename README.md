@@ -9,11 +9,13 @@
 ## 🔥 Features
 
 - **Posts, Comments, Reactions (multi-reaction)**: Flexible interaction model like Discord or Slack.
+- **Rich Attachments Support**: Posts can have multiple attachments, comments can have one attachment (image, video, file, or shared post).
 - **User-Agnostic**: Pass `user_id` only — you own auth and profiles.
 - **Hook System**: Subscribe to actions (post created, reaction added) for notifications or analytics.
 - **Adapter-Based DB Support**: PostgreSQL, SQLite, Firestore, Supabase (others pluggable).
 - **High Performance**: Fiber + Go for ultra-low latency APIs.
 - **Microservice-Friendly**: Stateless, lightweight, deploy anywhere.
+- **Geolocation Support**: Find content by location or city.
 - **Rate Limiting & Anti-Spam (Planned)**: Control abuse.
 - **OpenAPI Spec (Planned)**: Auto SDK support and docs.
 - **Future Plugins**: Reactions+, user mentions, moderation flags, subscriptions.
