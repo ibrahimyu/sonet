@@ -1,0 +1,36 @@
+version: '3'
+
+services:
+  sonet:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "8080:8080"
+    environment:
+      - PORT=8080
+      - ENV=development
+      - DB_ADAPTER=postgres
+      - DB_CONNECTION_STRING=postgres://sonet:sonet@postgres:5432/sonet
+      - RATE_LIMIT_ENABLED=true
+      - RATE_LIMIT_REQUESTS=100
+      - RATE_LIMIT_DURATION=60
+      - HOOKS_ENABLED=true
+    depends_on:
+      - postgres
+    restart: unless-stopped
+
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      - POSTGRES_USER=sonet
+      - POSTGRES_PASSWORD=sonet
+      - POSTGRES_DB=sonet
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
