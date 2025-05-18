@@ -25,8 +25,10 @@ Request Body:
 {
   "content": "Hello world!",
   "image_url": "https://example.com/image.jpg",  // Optional
+  "city": "New York",                           // Optional - City name
+  "latitude": 40.7128,                          // Optional - Geographic coordinate
+  "longitude": -74.0060,                        // Optional - Geographic coordinate
   "metadata": {                                  // Optional
-    "location": "New York",
     "tags": ["hello", "world"]
   }
 }
@@ -56,9 +58,15 @@ GET /api/posts/search
 ```
 
 Query Parameters:
-- `q` - Search query string (required)
+- `q` - Search query string (optional if city or location provided)
+- `city` - Filter by city name (optional)
+- `lat` - Latitude coordinate for location-based search (optional, requires lng)
+- `lng` - Longitude coordinate for location-based search (optional, requires lat)
+- `radius` - Search radius in kilometers (default: 10, only used with lat/lng)
 - `page` - Page number (default: 1)
 - `limit` - Items per page (default: 20, max: 100)
+
+At least one search parameter (q, city, or lat/lng) must be provided. When multiple parameters are used, they act as combined filters.
 
 #### Update a Post
 
@@ -71,8 +79,11 @@ Request Body:
 {
   "content": "Updated content",
   "image_url": "https://example.com/new-image.jpg",
+  "city": "Updated City",
+  "latitude": 34.0522,
+  "longitude": -118.2437,
   "metadata": {
-    "location": "Updated location"
+    "tags": ["updated", "content"]
   }
 }
 ```
@@ -82,6 +93,33 @@ Request Body:
 ```
 DELETE /api/posts/:id
 ```
+
+#### List Posts by City
+
+```
+GET /api/posts/city/:cityName
+```
+
+Query Parameters:
+- `page` - Page number (default: 1)
+- `limit` - Items per page (default: 20, max: 100)
+
+Returns posts from a specific city.
+
+#### Find Nearby Posts
+
+```
+GET /api/posts/nearby
+```
+
+Query Parameters:
+- `lat` - Latitude coordinate (required)
+- `lng` - Longitude coordinate (required)
+- `radius` - Search radius in kilometers (default: 10)
+- `page` - Page number (default: 1)
+- `limit` - Items per page (default: 20, max: 100)
+
+Returns posts within the specified radius of the given coordinates.
 
 ### Comments
 

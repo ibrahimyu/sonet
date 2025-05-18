@@ -3,8 +3,10 @@ package api
 import (
 	"errors"
 	"net/http"
+	"net/url"
 	"runtime"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/gofiber/fiber/v2"
@@ -47,12 +49,17 @@ func SetupRoutes(app *fiber.App, db adapters.DatabaseAdapter) {
 
 	// Health check
 	api.Get("/health", healthCheck(db))
-
 	// Post routes
 	posts := api.Group("/posts")
 	posts.Post("/", createPost(db))
 	posts.Get("/", listPosts(db))
 	posts.Get("/search", searchPosts(db))
+
+	// Location-based post routes
+	posts.Get("/nearby", findNearbyPosts(db))
+	posts.Get("/city/:cityName", listPostsByCity(db))
+
+	// Standard post CRUD routes
 	posts.Get("/:id", getPost(db))
 	posts.Put("/:id", updatePost(db))
 	posts.Delete("/:id", deletePost(db))
@@ -150,6 +157,17 @@ func createPost(db adapters.DatabaseAdapter) fiber.Handler {
 		}
 
 		post.UserID = userID
+
+		// Validate location fields if provided
+		if post.Latitude != 0 || post.Longitude != 0 {
+			if post.Latitude < -90 || post.Latitude > 90 {
+				return fiber.NewError(fiber.StatusBadRequest, "Latitude must be between -90 and 90")
+			}
+			if post.Longitude < -180 || post.Longitude > 180 {
+				return fiber.NewError(fiber.StatusBadRequest, "Longitude must be between -180 and 180")
+			}
+		}
+
 		if err := db.CreatePost(post); err != nil {
 			return err
 		}
@@ -228,6 +246,21 @@ func updatePost(db adapters.DatabaseAdapter) fiber.Handler {
 		post.Content = updatedPost.Content
 		post.ImageURL = updatedPost.ImageURL
 		post.Metadata = updatedPost.Metadata
+
+		// Update location fields
+		post.City = updatedPost.City
+		post.Latitude = updatedPost.Latitude
+		post.Longitude = updatedPost.Longitude
+
+		// Validate location fields if provided
+		if post.Latitude != 0 || post.Longitude != 0 {
+			if post.Latitude < -90 || post.Latitude > 90 {
+				return fiber.NewError(fiber.StatusBadRequest, "Latitude must be between -90 and 90")
+			}
+			if post.Longitude < -180 || post.Longitude > 180 {
+				return fiber.NewError(fiber.StatusBadRequest, "Longitude must be between -180 and 180")
+			}
+		}
 
 		if err := db.UpdatePost(post); err != nil {
 			return err
@@ -514,23 +547,195 @@ func deleteReaction(db adapters.DatabaseAdapter) fiber.Handler {
 func searchPosts(db adapters.DatabaseAdapter) fiber.Handler {
 	return func(c *fiber.Ctx) error {
 		query := c.Query("q")
-		if query == "" {
-			return fiber.NewError(fiber.StatusBadRequest, "Search query is required")
+		city := c.Query("city")
+		latStr := c.Query("lat")
+		lngStr := c.Query("lng")
+		radiusStr := c.Query("radius")
+
+		// At least one search criteria must be provided
+		if query == "" && city == "" && (latStr == "" || lngStr == "") {
+			return fiber.NewError(fiber.StatusBadRequest, "At least one search criteria (query, city, or location) is required")
 		}
 
 		limit, offset := getPaginationParams(c)
 		page, _ := strconv.Atoi(c.Query("page", "1"))
 
-		posts, err := db.SearchPosts(query, limit, offset)
+		// If location parameters are provided, use geospatial search
+		if latStr != "" && lngStr != "" {
+			lat, err := strconv.ParseFloat(latStr, 64)
+			if err != nil {
+				return fiber.NewError(fiber.StatusBadRequest, "Invalid latitude format")
+			}
+
+			lng, err := strconv.ParseFloat(lngStr, 64)
+			if err != nil {
+				return fiber.NewError(fiber.StatusBadRequest, "Invalid longitude format")
+			}
+
+			radius := 10.0 // Default radius in km
+			if radiusStr != "" {
+				radius, err = strconv.ParseFloat(radiusStr, 64)
+				if err != nil {
+					return fiber.NewError(fiber.StatusBadRequest, "Invalid radius format")
+				}
+			}
+
+			posts, err := db.FindNearbyPosts(lat, lng, radius, limit, offset)
+			if err != nil {
+				return err
+			}
+
+			// Filter by content query if provided
+			if query != "" {
+				filteredPosts := []*models.Post{}
+				for _, post := range posts {
+					if strings.Contains(strings.ToLower(post.Content), strings.ToLower(query)) {
+						filteredPosts = append(filteredPosts, post)
+					}
+				}
+				posts = filteredPosts
+			}
+
+			return c.JSON(fiber.Map{
+				"data": posts,
+				"meta": fiber.Map{
+					"query":  query,
+					"lat":    lat,
+					"lng":    lng,
+					"radius": radius,
+					"page":   page,
+					"limit":  limit,
+					"offset": offset,
+					"count":  len(posts),
+				},
+			})
+		} else if city != "" {
+			// Search by city
+			posts, err := db.ListPostsByCity(city, limit, offset)
+			if err != nil {
+				return err
+			}
+
+			// Filter by content query if provided
+			if query != "" {
+				filteredPosts := []*models.Post{}
+				for _, post := range posts {
+					if strings.Contains(strings.ToLower(post.Content), strings.ToLower(query)) {
+						filteredPosts = append(filteredPosts, post)
+					}
+				}
+				posts = filteredPosts
+			}
+
+			return c.JSON(fiber.Map{
+				"data": posts,
+				"meta": fiber.Map{
+					"query":  query,
+					"city":   city,
+					"page":   page,
+					"limit":  limit,
+					"offset": offset,
+					"count":  len(posts),
+				},
+			})
+		} else {
+			// Regular text search
+			posts, err := db.SearchPosts(query, limit, offset)
+			if err != nil {
+				return err
+			}
+
+			return c.JSON(fiber.Map{
+				"data": posts,
+				"meta": fiber.Map{
+					"query":  query,
+					"page":   page,
+					"limit":  limit,
+					"offset": offset,
+					"count":  len(posts),
+				},
+			})
+		}
+	}
+}
+
+// List posts by city
+func listPostsByCity(db adapters.DatabaseAdapter) fiber.Handler {
+	return func(c *fiber.Ctx) error {
+		// URL-decode the city name parameter
+		cityName := c.Params("cityName")
+		if cityName == "" {
+			return fiber.NewError(fiber.StatusBadRequest, "City name is required")
+		}
+
+		// URL decode the city name
+		var err error
+		cityName, err = url.QueryUnescape(cityName)
+		if err != nil {
+			return fiber.NewError(fiber.StatusBadRequest, "Invalid city name format")
+		}
+
+		limit, offset := getPaginationParams(c)
+		page, _ := strconv.Atoi(c.Query("page", "1"))
+
+		posts, err := db.ListPostsByCity(cityName, limit, offset)
 		if err != nil {
 			return err
 		}
 
-		// Return with pagination metadata
 		return c.JSON(fiber.Map{
 			"data": posts,
 			"meta": fiber.Map{
-				"query":  query,
+				"city":   cityName,
+				"page":   page,
+				"limit":  limit,
+				"offset": offset,
+				"count":  len(posts),
+			},
+		})
+	}
+}
+
+// Find nearby posts
+func findNearbyPosts(db adapters.DatabaseAdapter) fiber.Handler {
+	return func(c *fiber.Ctx) error {
+		latStr := c.Query("lat")
+		lngStr := c.Query("lng")
+		radiusStr := c.Query("radius", "10") // Default 10km radius
+
+		if latStr == "" || lngStr == "" {
+			return fiber.NewError(fiber.StatusBadRequest, "Latitude and longitude are required")
+		}
+
+		lat, err := strconv.ParseFloat(latStr, 64)
+		if err != nil {
+			return fiber.NewError(fiber.StatusBadRequest, "Invalid latitude format")
+		}
+
+		lng, err := strconv.ParseFloat(lngStr, 64)
+		if err != nil {
+			return fiber.NewError(fiber.StatusBadRequest, "Invalid longitude format")
+		}
+
+		radius, err := strconv.ParseFloat(radiusStr, 64)
+		if err != nil {
+			return fiber.NewError(fiber.StatusBadRequest, "Invalid radius format")
+		}
+
+		limit, offset := getPaginationParams(c)
+		page, _ := strconv.Atoi(c.Query("page", "1"))
+
+		posts, err := db.FindNearbyPosts(lat, lng, radius, limit, offset)
+		if err != nil {
+			return err
+		}
+
+		return c.JSON(fiber.Map{
+			"data": posts,
+			"meta": fiber.Map{
+				"lat":    lat,
+				"lng":    lng,
+				"radius": radius,
 				"page":   page,
 				"limit":  limit,
 				"offset": offset,

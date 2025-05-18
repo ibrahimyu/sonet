@@ -34,6 +34,27 @@ func newPostgresAdapter() (*PostgresAdapter, error) {
 		return nil, fmt.Errorf("failed to connect to database: %v", err)
 	}
 
+	// Enable PostGIS extension for geospatial features
+	if err := db.Exec("CREATE EXTENSION IF NOT EXISTS postgis").Error; err != nil {
+		return nil, fmt.Errorf("failed to enable PostGIS extension: %v", err)
+	}
+
+	// Create a spatial index for geolocation queries if it doesn't exist
+	if err := db.Exec(`
+		DO $$
+		BEGIN
+			IF NOT EXISTS (
+				SELECT 1 FROM pg_indexes WHERE indexname = 'idx_posts_location'
+			) THEN
+				CREATE INDEX idx_posts_location ON posts USING GIST (
+					ST_SetSRID(ST_MakePoint(longitude, latitude), 4326)
+				);
+			END IF;
+		END $$;
+	`).Error; err != nil {
+		return nil, fmt.Errorf("failed to create spatial index: %v", err)
+	}
+
 	// Auto migrate the schema
 	if err := db.AutoMigrate(&models.Post{}, &models.Comment{}, &models.Reaction{}); err != nil {
 		return nil, fmt.Errorf("failed to migrate database schema: %v", err)
@@ -197,6 +218,51 @@ func (a *PostgresAdapter) SearchPosts(query string, limit, offset int) ([]*model
 		Limit(limit).
 		Offset(offset).
 		Find(&posts).Error
+
+	return posts, err
+}
+
+// ListPostsByCity returns posts from a specific city
+func (a *PostgresAdapter) ListPostsByCity(city string, limit, offset int) ([]*models.Post, error) {
+	var posts []*models.Post
+	err := a.db.Where("city = ?", city).
+		Order("created_at DESC").
+		Limit(limit).
+		Offset(offset).
+		Find(&posts).Error
+	return posts, err
+}
+
+// FindNearbyPosts finds posts within a certain radius of a location
+func (a *PostgresAdapter) FindNearbyPosts(lat, lng float64, radiusKm float64, limit, offset int) ([]*models.Post, error) {
+	var posts []*models.Post
+
+	// Use PostGIS ST_DWithin function with the spatial index for efficient geospatial queries
+	// Convert radius from km to meters for ST_DistanceSphere
+	query := `
+		SELECT * FROM posts
+		WHERE latitude IS NOT NULL AND longitude IS NOT NULL
+		AND ST_DWithin(
+			ST_SetSRID(ST_MakePoint(longitude, latitude), 4326),
+			ST_SetSRID(ST_MakePoint(?, ?), 4326),
+			?
+		)
+		ORDER BY ST_DistanceSphere(
+			ST_MakePoint(longitude, latitude),
+			ST_MakePoint(?, ?)
+		) ASC
+		LIMIT ? OFFSET ?
+	`
+
+	// Convert radius from km to meters for ST_DistanceSphere
+	radiusMeters := radiusKm * 1000.0
+
+	err := a.db.Raw(query,
+		lng, lat, // First point coordinates (note: longitude first in ST_MakePoint)
+		radiusMeters,
+		lng, lat, // Second point coordinates for the ORDER BY
+		limit, offset,
+	).Scan(&posts).Error
 
 	return posts, err
 }

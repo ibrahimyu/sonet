@@ -3,7 +3,6 @@ package models
 import (
 	"database/sql/driver"
 	"encoding/json"
-	"errors"
 	"fmt"
 )
 
@@ -32,7 +31,7 @@ func (j *JSON) Scan(value interface{}) error {
 	case string:
 		byteData = []byte(v)
 	default:
-		return errors.New(fmt.Sprintf("Failed to scan JSON value: unsupported type %T", value))
+		return fmt.Errorf("failed to scan JSON value: unsupported type %T", value)
 	}
 
 	var result map[string]interface{}
@@ -55,10 +54,6 @@ func (j JSON) MarshalJSON() ([]byte, error) {
 
 // UnmarshalJSON implements json.Unmarshaler interface
 func (j *JSON) UnmarshalJSON(data []byte) error {
-	if j == nil {
-		*j = make(JSON)
-	}
-
 	var temp map[string]interface{}
 	if err := json.Unmarshal(data, &temp); err != nil {
 		return err

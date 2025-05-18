@@ -18,6 +18,10 @@ type DatabaseAdapter interface {
 	UpdatePost(post *models.Post) error
 	DeletePost(id string) error
 
+	// Location-based queries
+	ListPostsByCity(city string, limit, offset int) ([]*models.Post, error)
+	FindNearbyPosts(lat, lng float64, radiusKm float64, limit, offset int) ([]*models.Post, error)
+
 	// Comments
 	CreateComment(comment *models.Comment) error
 	GetCommentByID(id string) (*models.Comment, error)

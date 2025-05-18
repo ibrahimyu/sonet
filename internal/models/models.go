@@ -13,6 +13,9 @@ type Post struct {
 	UserID    string    `json:"user_id" gorm:"index"`
 	Content   string    `json:"content"`
 	ImageURL  string    `json:"image_url,omitempty"`
+	City      string    `json:"city,omitempty" gorm:"index"`
+	Latitude  float64   `json:"latitude,omitempty" gorm:"index"`
+	Longitude float64   `json:"longitude,omitempty" gorm:"index"`
 	Metadata  JSON      `json:"metadata,omitempty" gorm:"type:jsonb"`
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`

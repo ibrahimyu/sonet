@@ -111,6 +111,16 @@ func (m *MockDatabaseAdapter) SearchPosts(query string, limit, offset int) ([]*m
 	return args.Get(0).([]*models.Post), args.Error(1)
 }
 
+func (m *MockDatabaseAdapter) ListPostsByCity(city string, limit, offset int) ([]*models.Post, error) {
+	args := m.Called(city, limit, offset)
+	return args.Get(0).([]*models.Post), args.Error(1)
+}
+
+func (m *MockDatabaseAdapter) FindNearbyPosts(lat, lng float64, radiusKm float64, limit, offset int) ([]*models.Post, error) {
+	args := m.Called(lat, lng, radiusKm, limit, offset)
+	return args.Get(0).([]*models.Post), args.Error(1)
+}
+
 // Helper function to create a test app
 func setupTestApp(db *MockDatabaseAdapter) *fiber.App {
 	app := fiber.New(fiber.Config{

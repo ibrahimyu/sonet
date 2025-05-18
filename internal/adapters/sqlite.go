@@ -2,6 +2,7 @@ package adapters
 
 import (
 	"fmt"
+	"math"
 
 	"github.com/spf13/viper"
 	"gorm.io/driver/sqlite"
@@ -200,4 +201,72 @@ func (a *SQLiteAdapter) SearchPosts(query string, limit, offset int) ([]*models.
 		Find(&posts).Error
 
 	return posts, err
+}
+
+// ListPostsByCity returns posts from a specific city
+func (a *SQLiteAdapter) ListPostsByCity(city string, limit, offset int) ([]*models.Post, error) {
+	var posts []*models.Post
+	// Use exact match rather than LIKE for city
+	err := a.db.Where("city = ?", city).
+		Order("created_at DESC").
+		Limit(limit).
+		Offset(offset).
+		Find(&posts).Error
+	return posts, err
+}
+
+// FindNearbyPosts finds posts within a certain radius of a location
+func (a *SQLiteAdapter) FindNearbyPosts(lat, lng float64, radiusKm float64, limit, offset int) ([]*models.Post, error) {
+	var posts []*models.Post
+
+	// For better performance, use a bounding box first to limit the number of records
+	// A rough approximation: 1 degree of latitude ≈ 111 km
+	// 1 degree of longitude ≈ 111 * cos(latitude) km
+	latDelta := (radiusKm * 1.2) / 111.0 // Add 20% margin for safety
+	lngDelta := (radiusKm * 1.2) / (111.0 * math.Cos(lat*math.Pi/180.0))
+
+	// Use the bounding box to reduce the number of candidates
+	err := a.db.Where("latitude IS NOT NULL AND longitude IS NOT NULL").
+		Where("latitude BETWEEN ? AND ?", lat-latDelta, lat+latDelta).
+		Where("longitude BETWEEN ? AND ?", lng-lngDelta, lng+lngDelta).
+		Order("created_at DESC").
+		Find(&posts).Error
+
+	if err != nil {
+		return nil, err
+	}
+
+	// Filter the candidates by accurate distance and apply pagination in memory
+	const earthRadius = 6371.0 // Earth radius in kilometers
+	filteredPosts := make([]*models.Post, 0)
+
+	for _, post := range posts {
+		// Calculate distance using Haversine formula
+		radLat1 := lat * math.Pi / 180
+		radLat2 := post.Latitude * math.Pi / 180
+		deltaLng := (post.Longitude - lng) * math.Pi / 180
+		deltaLat := (post.Latitude - lat) * math.Pi / 180
+
+		a := math.Sin(deltaLat/2)*math.Sin(deltaLat/2) +
+			math.Cos(radLat1)*math.Cos(radLat2)*
+				math.Sin(deltaLng/2)*math.Sin(deltaLng/2)
+		c := 2 * math.Atan2(math.Sqrt(a), math.Sqrt(1-a))
+		distance := earthRadius * c
+
+		if distance <= radiusKm {
+			filteredPosts = append(filteredPosts, post)
+		}
+	}
+
+	// Apply pagination to the filtered results
+	start := offset
+	end := offset + limit
+	if start >= len(filteredPosts) {
+		return []*models.Post{}, nil
+	}
+	if end > len(filteredPosts) {
+		end = len(filteredPosts)
+	}
+
+	return filteredPosts[start:end], nil
 }
